@@ -1,0 +1,12 @@
+# Local Environment Variables (Do not commit to Git)
+env.js
+.env
+.env.local
+.env.*.local
+
+# Vercel
+.vercel
+
+# System Files
+.DS_Store
+Thumbs.db

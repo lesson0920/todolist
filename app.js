@@ -7,6 +7,43 @@ document.addEventListener('DOMContentLoaded', () => {
   const STORAGE_KEY_TASKS = 'smart_todolist_tasks_v1';
   const STORAGE_KEY_THEME = 'smart_todolist_theme_v1';
 
+  // Supabase Cloud Database Client (환경 변수를 통해 동적으로 초기화됩니다)
+  let supabase = null;
+
+  async function initSupabase() {
+    // 1. 로컬 환경: window.ENV (env.js 파일) 확인
+    let url = (window.ENV && window.ENV.SUPABASE_URL) || '';
+    let key = (window.ENV && window.ENV.SUPABASE_ANON_KEY) || '';
+
+    // 2. Vercel 배포 환경: /api/config 서버리스 엔드포인트에서 Vercel 환경 변수 가져오기
+    if (!url || !key || url === 'YOUR_SUPABASE_URL') {
+      try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+          const config = await res.json();
+          if (config.SUPABASE_URL && config.SUPABASE_ANON_KEY) {
+            url = config.SUPABASE_URL;
+            key = config.SUPABASE_ANON_KEY;
+          }
+        }
+      } catch (e) {
+        // 로컬 파일 직접 열기 등 네트워크 요청 불가 환경
+      }
+    }
+
+    if (url && key && url !== 'YOUR_SUPABASE_URL' && window.supabase) {
+      try {
+        supabase = window.supabase.createClient(url, key);
+        console.log('✅ Supabase 환경 변수 연결 성공');
+        await fetchTasksFromSupabase();
+      } catch (err) {
+        console.warn('⚠️ Supabase init warning:', err);
+      }
+    } else {
+      console.log('ℹ️ Supabase 환경 변수가 설정되지 않아 로컬 저장소 모드로 작동합니다.');
+    }
+  }
+
   // Sample initial data if storage is empty
   const SAMPLE_TASKS = [
     {
@@ -119,10 +156,11 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDateDisplay();
     attachEventListeners();
     render();
+    initSupabase();
   }
 
   /* ==========================================================================
-     Storage & Persistence
+     Storage & Persistence (Local & Supabase Hybrid)
      ========================================================================== */
   function loadTasks() {
     const stored = localStorage.getItem(STORAGE_KEY_TASKS);
@@ -141,6 +179,105 @@ document.addEventListener('DOMContentLoaded', () => {
   function saveTasks() {
     localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
     render();
+  }
+
+  // DB <-> Frontend Task Mappers
+  function toDBTask(task) {
+    return {
+      id: task.id,
+      title: task.title,
+      description: task.description || '',
+      category: task.category || '개인',
+      priority: task.priority || 'medium',
+      due_date: task.dueDate || null,
+      completed: !!task.completed,
+      created_at: task.createdAt || new Date().toISOString()
+    };
+  }
+
+  function fromDBTask(row) {
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description || '',
+      category: row.category || '개인',
+      priority: row.priority || 'medium',
+      dueDate: row.due_date || '',
+      completed: !!row.completed,
+      completedAt: row.completed ? (row.created_at || new Date().toISOString()) : null,
+      createdAt: row.created_at || new Date().toISOString()
+    };
+  }
+
+  // Supabase Async Operations
+  async function fetchTasksFromSupabase() {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('todos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('💡 Supabase 테이블 확인 안내 (현재 로컬 모드로 안전하게 작동 중):', error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        tasks = data.map(fromDBTask);
+        localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
+        render();
+        console.log('☁️ Supabase에서 할 일 목록을 성공적으로 불러왔습니다:', tasks.length + '개');
+      } else if (data && data.length === 0 && tasks.length > 0) {
+        // DB 테이블이 비어있는 경우 초기 샘플 데이터 클라우드 동기화
+        syncAllToSupabase();
+      }
+    } catch (err) {
+      console.error('Supabase fetch error:', err);
+    }
+  }
+
+  async function syncAllToSupabase() {
+    if (!supabase || tasks.length === 0) return;
+    try {
+      const dbRows = tasks.map(toDBTask);
+      const { error } = await supabase.from('todos').upsert(dbRows);
+      if (!error) console.log('☁️ Supabase에 초기 데이터를 성공적으로 업로드했습니다.');
+    } catch (err) {
+      console.warn('Supabase sync warning:', err);
+    }
+  }
+
+  async function insertSupabaseTask(task) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from('todos').insert([toDBTask(task)]);
+      if (error) console.warn('Supabase insert warning:', error.message);
+      else console.log('☁️ Supabase에 새 할 일이 저장되었습니다:', task.title);
+    } catch (err) {
+      console.error('Supabase insert error:', err);
+    }
+  }
+
+  async function updateSupabaseTask(task) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from('todos').update(toDBTask(task)).eq('id', task.id);
+      if (error) console.warn('Supabase update warning:', error.message);
+    } catch (err) {
+      console.error('Supabase update error:', err);
+    }
+  }
+
+  async function deleteSupabaseTask(id) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from('todos').delete().eq('id', id);
+      if (error) console.warn('Supabase delete warning:', error.message);
+      else console.log('☁️ Supabase에서 할 일이 삭제되었습니다 (id):', id);
+    } catch (err) {
+      console.error('Supabase delete error:', err);
+    }
   }
 
   /* ==========================================================================
@@ -445,12 +582,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     saveTasks();
+    updateSupabaseTask(task);
   }
 
   function deleteTask(id) {
     if (!confirm('이 할 일을 정말로 삭제하시겠습니까?')) return;
     tasks = tasks.filter(t => t.id !== id);
     saveTasks();
+    deleteSupabaseTask(id);
   }
 
   function openTaskFormModal(taskId = null) {
@@ -499,6 +638,8 @@ document.addEventListener('DOMContentLoaded', () => {
         task.category = category;
         task.priority = priority;
         task.dueDate = dueDate;
+        saveTasks();
+        updateSupabaseTask(task);
       }
     } else {
       // Add new task
@@ -514,9 +655,10 @@ document.addEventListener('DOMContentLoaded', () => {
         createdAt: new Date().toISOString()
       };
       tasks.unshift(newTask);
+      saveTasks();
+      insertSupabaseTask(newTask);
     }
 
-    saveTasks();
     closeTaskFormModal();
   }
 
