@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Task Manager - 스마트 할 일 목록</title>
+  <meta name="description" content="세련된 디자인과 생산성 통계를 제공하는 스마트 바닐라 JS 할 일 관리 애플리케이션">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Ambient background lighting effect -->
+  <div class="ambient-glow-1"></div>
+  <div class="ambient-glow-2"></div>
+
+  <!-- Canvas for completion celebration confetti -->
+  <canvas id="confetti-canvas"></canvas>
+
+  <div id="app">
+    <!-- Header Component -->
+    <header class="header glass-card">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-check-double"></i>
+        </div>
+        <div class="brand-title">
+          <h1>Smart Task Planner</h1>
+          <p id="current-date-text">오늘의 일정을 스마트하게 관리하세요</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btn-open-stats" class="btn btn-secondary" title="생산성 통계 모달 열기">
+          <i class="fa-solid fa-chart-pie"></i> 통계
+        </button>
+        <button id="btn-export-data" class="btn btn-secondary" title="데이터 내보내기 (JSON)">
+          <i class="fa-solid fa-download"></i> 내보내기
+        </button>
+        <label for="file-import-json" class="btn btn-secondary" style="cursor: pointer;" title="데이터 불러오기 (JSON)">
+          <i class="fa-solid fa-upload"></i> 불러오기
+          <input type="file" id="file-import-json" accept=".json" style="display: none;">
+        </label>
+        <button id="btn-theme-toggle" class="btn-icon" title="다크/라이트 테마 전환">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Dashboard Bar Component -->
+    <div class="dashboard-bar">
+      <div class="stat-card glass-card">
+        <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">
+          <i class="fa-solid fa-list-check"></i>
+        </div>
+        <div class="stat-info" style="flex: 1;">
+          <div class="stat-value" id="stat-total-tasks">0</div>
+          <div class="stat-label">전체 할 일</div>
+        </div>
+      </div>
+
+      <div class="stat-card glass-card">
+        <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+          <i class="fa-solid fa-clock"></i>
+        </div>
+        <div class="stat-info" style="flex: 1;">
+          <div class="stat-value" id="stat-today-tasks">0</div>
+          <div class="stat-label">오늘 마감 예정</div>
+        </div>
+      </div>
+
+      <div class="stat-card glass-card">
+        <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+          <i class="fa-solid fa-trophy"></i>
+        </div>
+        <div class="stat-info" style="flex: 1;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <div class="stat-value" id="stat-completion-rate">0%</div>
+            <span style="font-size: 0.75rem; color: var(--text-muted);" id="stat-done-count">0/0 완료</span>
+          </div>
+          <div class="stat-label">달성률</div>
+          <div class="progress-container">
+            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Control Panel (Search, Filters, Add Button) -->
+    <section class="control-panel glass-card">
+      <div class="search-add-row">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="input-search" class="input-field" placeholder="할 일 검색..." autocomplete="off">
+        </div>
+        <button id="btn-open-add-modal" class="btn btn-primary">
+          <i class="fa-solid fa-plus"></i> 새 할 일 추가
+        </button>
+      </div>
+
+      <div class="filter-pills-row">
+        <!-- Filter Status Pills -->
+        <div class="pill-group" id="filter-status-group">
+          <button class="pill-btn active" data-status="all">전체 <span id="count-pill-all">(0)</span></button>
+          <button class="pill-btn" data-status="active">진행 중 <span id="count-pill-active">(0)</span></button>
+          <button class="pill-btn" data-status="completed">완료됨 <span id="count-pill-completed">(0)</span></button>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <!-- Category Filter -->
+          <select id="filter-category" class="select-dropdown">
+            <option value="all">모든 카테고리</option>
+            <option value="업무">💼 업무</option>
+            <option value="개인">👤 개인</option>
+            <option value="공부">📚 공부</option>
+            <option value="건강">🏋️ 건강</option>
+            <option value="쇼핑">🛒 쇼핑</option>
+            <option value="기타">📌 기타</option>
+          </select>
+
+          <!-- Priority Filter -->
+          <select id="filter-priority" class="select-dropdown">
+            <option value="all">모든 우선순위</option>
+            <option value="high">🔴 높음</option>
+            <option value="medium">🟡 보통</option>
+            <option value="low">🟢 낮음</option>
+          </select>
+
+          <!-- Sort Selector -->
+          <select id="select-sort" class="select-dropdown">
+            <option value="dueDate">📅 마감일 순</option>
+            <option value="priority">🔥 우선순위 순</option>
+            <option value="createdAt">✨ 최신 생성 순</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Task Card List Container -->
+    <main class="task-list" id="task-list-container">
+      <!-- Dynamically populated via JS -->
+    </main>
+
+    <!-- Empty State Template -->
+    <div id="empty-state" class="glass-card empty-state" style="display: none;">
+      <div class="empty-icon">
+        <i class="fa-solid fa-clipboard-check"></i>
+      </div>
+      <div class="empty-title">등록된 할 일이 없습니다</div>
+      <div class="empty-sub">새로운 목표나 할 일을 추가하여 오늘 하루를 완벽하게 관리해 보세요!</div>
+      <button id="btn-empty-add" class="btn btn-primary" style="margin-top: 0.5rem;">
+        <i class="fa-solid fa-plus"></i> 첫 할 일 등록하기
+      </button>
+    </div>
+  </div>
+
+  <!-- Add/Edit Task Modal -->
+  <div class="modal-overlay" id="modal-task-form">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-form-title">새 할 일 추가</div>
+        <button class="close-btn" class="btn-close-modal" id="btn-close-task-modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="task-form">
+        <input type="hidden" id="form-task-id">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="form-title">할 일 제목 *</label>
+            <input type="text" id="form-title" class="input-field" style="padding-left: 1rem;" placeholder="예: 상반기 주간 보고서 제출하기" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="form-desc">상세 설명 (선택)</label>
+            <textarea id="form-desc" class="input-field" placeholder="필요한 세부 정보나 메모를 작성하세요..."></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="form-category">카테고리</label>
+              <select id="form-category" class="select-field">
+                <option value="업무">💼 업무</option>
+                <option value="개인">👤 개인</option>
+                <option value="공부">📚 공부</option>
+                <option value="건강">🏋️ 건강</option>
+                <option value="쇼핑">🛒 쇼핑</option>
+                <option value="기타">📌 기타</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="form-priority">우선순위</label>
+              <select id="form-priority" class="select-field">
+                <option value="low">🟢 낮음</option>
+                <option value="medium" selected>🟡 보통</option>
+                <option value="high">🔴 높음</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="form-due-date">마감 날짜</label>
+            <input type="date" id="form-due-date" class="select-field">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-task-form">취소</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-task-form">
+            <i class="fa-solid fa-check"></i> 저장하기
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Productivity Statistics Modal -->
+  <div class="modal-overlay" id="modal-stats">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-chart-pie" style="color: var(--accent-primary);"></i> 생산성 통계 분석</div>
+        <button class="close-btn" id="btn-close-stats-modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="stats-grid">
+          <div class="stats-card-mini">
+            <div class="val" id="stats-total-val">0</div>
+            <div class="lbl">누적 할 일</div>
+          </div>
+          <div class="stats-card-mini">
+            <div class="val" id="stats-completed-val">0</div>
+            <div class="lbl">완료된 할 일</div>
+          </div>
+          <div class="stats-card-mini">
+            <div class="val" id="stats-rate-val">0%</div>
+            <div class="lbl">평균 달성률</div>
+          </div>
+          <div class="stats-card-mini">
+            <div class="val" id="stats-streak-val">0일</div>
+            <div class="lbl">연속 달성 스트릭</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem;">📊 카테고리별 작업 비중</h4>
+          <div class="category-breakdown-list" id="category-breakdown-container">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btn-confirm-stats">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
