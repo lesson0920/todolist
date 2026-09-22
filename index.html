@@ -34,24 +34,98 @@
       </div>
 
       <div class="header-actions">
-        <button id="btn-open-stats" class="btn btn-secondary" title="생산성 통계 모달 열기">
-          <i class="fa-solid fa-chart-pie"></i> 통계
-        </button>
-        <button id="btn-export-data" class="btn btn-secondary" title="데이터 내보내기 (JSON)">
-          <i class="fa-solid fa-download"></i> 내보내기
-        </button>
-        <label for="file-import-json" class="btn btn-secondary" style="cursor: pointer;" title="데이터 불러오기 (JSON)">
-          <i class="fa-solid fa-upload"></i> 불러오기
-          <input type="file" id="file-import-json" accept=".json" style="display: none;">
-        </label>
+        <!-- User Profile & Logout (로그인 시 활성화) -->
+        <div id="auth-user-bar" class="user-profile-bar" style="display: none;">
+          <div class="user-pill">
+            <i class="fa-solid fa-circle-user"></i>
+            <span id="user-email-text">user@email.com</span>
+          </div>
+          <button id="btn-logout" class="btn btn-secondary btn-sm" title="로그아웃">
+            <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+          </button>
+        </div>
+
+        <div id="header-tools" style="display: none; align-items: center; gap: 0.5rem;">
+          <button id="btn-open-stats" class="btn btn-secondary" title="생산성 통계 모달 열기">
+            <i class="fa-solid fa-chart-pie"></i> 통계
+          </button>
+          <button id="btn-export-data" class="btn btn-secondary" title="데이터 내보내기 (JSON)">
+            <i class="fa-solid fa-download"></i> 내보내기
+          </button>
+          <label for="file-import-json" class="btn btn-secondary" style="cursor: pointer;" title="데이터 불러오기 (JSON)">
+            <i class="fa-solid fa-upload"></i> 불러오기
+            <input type="file" id="file-import-json" accept=".json" style="display: none;">
+          </label>
+        </div>
+
         <button id="btn-theme-toggle" class="btn-icon" title="다크/라이트 테마 전환">
           <i class="fa-solid fa-moon"></i>
         </button>
       </div>
     </header>
 
-    <!-- Dashboard Bar Component -->
-    <div class="dashboard-bar">
+    <!-- Auth Container (로그인하지 않았을 때 보이는 화면) -->
+    <div id="auth-container" class="auth-section">
+      <div class="auth-card glass-card">
+        <div class="auth-header">
+          <div class="auth-icon-badge">
+            <i class="fa-solid fa-shield-halved"></i>
+          </div>
+          <h2 id="auth-title">스마트 할 일 시작하기</h2>
+          <p id="auth-subtitle">계정에 로그인하여 나만의 일정을 안전하게 관리하세요</p>
+        </div>
+
+        <!-- Auth Tabs (로그인 / 회원가입 전환) -->
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab-btn active" id="tab-login" data-tab="login">
+            <i class="fa-solid fa-right-to-bracket"></i> 로그인
+          </button>
+          <button type="button" class="auth-tab-btn" id="tab-signup" data-tab="signup">
+            <i class="fa-solid fa-user-plus"></i> 회원가입
+          </button>
+        </div>
+
+        <!-- Feedback Alert Box -->
+        <div id="auth-alert" class="auth-alert" style="display: none;"></div>
+
+        <!-- Auth Form -->
+        <form id="auth-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label" for="auth-email">이메일</label>
+            <div class="input-icon-wrapper">
+              <i class="fa-regular fa-envelope input-icon"></i>
+              <input type="email" id="auth-email" class="input-field" placeholder="name@example.com" required autocomplete="email">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="auth-password">비밀번호</label>
+            <div class="input-icon-wrapper">
+              <i class="fa-solid fa-lock input-icon"></i>
+              <input type="password" id="auth-password" class="input-field" placeholder="6자리 이상 비밀번호" required autocomplete="current-password" minlength="6">
+            </div>
+          </div>
+
+          <div class="form-group" id="group-password-confirm" style="display: none;">
+            <label class="form-label" for="auth-password-confirm">비밀번호 확인</label>
+            <div class="input-icon-wrapper">
+              <i class="fa-solid fa-shield-check input-icon"></i>
+              <input type="password" id="auth-password-confirm" class="input-field" placeholder="비밀번호 다시 입력" autocomplete="new-password">
+            </div>
+          </div>
+
+          <button type="submit" id="btn-auth-submit" class="btn btn-primary auth-submit-btn">
+            <i class="fa-solid fa-arrow-right-to-bracket" id="auth-btn-icon"></i>
+            <span id="auth-btn-text">로그인</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Main Content Container (로그인한 사용자에게만 표시) -->
+    <div id="main-content" style="display: none;">
+      <!-- Dashboard Bar Component -->
+      <div class="dashboard-bar">
       <div class="stat-card glass-card">
         <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">
           <i class="fa-solid fa-list-check"></i>
@@ -155,7 +229,8 @@
         <i class="fa-solid fa-plus"></i> 첫 할 일 등록하기
       </button>
     </div>
-  </div>
+    </div> <!-- /#main-content -->
+  </div> <!-- /#app -->
 
   <!-- Add/Edit Task Modal -->
   <div class="modal-overlay" id="modal-task-form">
@@ -266,8 +341,14 @@
   <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- Local Environment Variables (Git-ignored) -->
-  <script src="env.js"></script>
+  <!-- Local Environment Variables (로컬 환경에서만 로드하여 404 방지) -->
+  <script>
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+      const s = document.createElement('script');
+      s.src = 'env.js';
+      document.head.appendChild(s);
+    }
+  </script>
 
   <!-- JavaScript Logic -->
   <script src="app.js"></script>

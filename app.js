@@ -7,8 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const STORAGE_KEY_TASKS = 'smart_todolist_tasks_v1';
   const STORAGE_KEY_THEME = 'smart_todolist_theme_v1';
 
-  // Supabase Cloud Database Client (환경 변수를 통해 동적으로 초기화됩니다)
+  // Supabase Cloud Database Client & Auth State
   let supabase = null;
+  let currentUser = null;
 
   async function initSupabase() {
     // 1. 로컬 환경: window.ENV (env.js 파일) 확인
@@ -34,13 +35,50 @@ document.addEventListener('DOMContentLoaded', () => {
     if (url && key && url !== 'YOUR_SUPABASE_URL' && window.supabase) {
       try {
         supabase = window.supabase.createClient(url, key);
-        console.log('✅ Supabase 환경 변수 연결 성공');
-        await fetchTasksFromSupabase();
+        console.log('✅ Supabase 클라이언트 연결 성공');
+
+        // Supabase 인증 상태 변경 리스너 등록
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          console.log('🔔 Supabase Auth Event:', event, session?.user?.email);
+          handleAuthStateChange(event, session);
+        });
+
+        // 현재 브라우저에 저장된 기존 세션 확인
+        const { data: { session } } = await supabase.auth.getSession();
+        handleAuthStateChange(session ? 'INITIAL_SESSION' : 'NO_SESSION', session);
       } catch (err) {
         console.warn('⚠️ Supabase init warning:', err);
       }
     } else {
       console.log('ℹ️ Supabase 환경 변수가 설정되지 않아 로컬 저장소 모드로 작동합니다.');
+      handleAuthStateChange('NO_ENV', null);
+    }
+  }
+
+  function handleAuthStateChange(event, session) {
+    const authContainer = document.getElementById('auth-container');
+    const mainContent = document.getElementById('main-content');
+    const authUserBar = document.getElementById('auth-user-bar');
+    const userEmailText = document.getElementById('user-email-text');
+    const headerTools = document.getElementById('header-tools');
+
+    if (session && session.user) {
+      currentUser = session.user;
+      if (userEmailText) userEmailText.textContent = currentUser.email;
+      if (authUserBar) authUserBar.style.display = 'flex';
+      if (headerTools) headerTools.style.display = 'flex';
+      if (authContainer) authContainer.style.display = 'none';
+      if (mainContent) mainContent.style.display = 'block';
+
+      fetchTasksFromSupabase();
+    } else {
+      currentUser = null;
+      if (authUserBar) authUserBar.style.display = 'none';
+      if (headerTools) headerTools.style.display = 'none';
+      if (mainContent) mainContent.style.display = 'none';
+      if (authContainer) authContainer.style.display = 'block';
+      tasks = [];
+      render();
     }
   }
 
@@ -103,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // State
-  let tasks = loadTasks();
+  let tasks = [];
   let currentFilters = {
     search: '',
     status: 'all',
@@ -155,6 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     updateDateDisplay();
     attachEventListeners();
+    attachAuthEventListeners();
     render();
     initSupabase();
   }
@@ -183,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // DB <-> Frontend Task Mappers
   function toDBTask(task) {
-    return {
+    const row = {
       id: task.id,
       title: task.title,
       description: task.description || '',
@@ -193,6 +232,10 @@ document.addEventListener('DOMContentLoaded', () => {
       completed: !!task.completed,
       created_at: task.createdAt || new Date().toISOString()
     };
+    if (currentUser && currentUser.id) {
+      row.user_id = currentUser.id;
+    }
+    return row;
   }
 
   function fromDBTask(row) {
@@ -209,9 +252,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Supabase Async Operations
+  // Supabase Async Operations (사용자별 RLS 정책 적용)
   async function fetchTasksFromSupabase() {
-    if (!supabase) return;
+    if (!supabase || !currentUser) return;
     try {
       const { data, error } = await supabase
         .from('todos')
@@ -219,37 +262,22 @@ document.addEventListener('DOMContentLoaded', () => {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('💡 Supabase 테이블 확인 안내 (현재 로컬 모드로 안전하게 작동 중):', error.message);
+        console.warn('💡 Supabase 할 일 조회 안내:', error.message);
         return;
       }
 
-      if (data && data.length > 0) {
+      if (data) {
         tasks = data.map(fromDBTask);
-        localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
         render();
-        console.log('☁️ Supabase에서 할 일 목록을 성공적으로 불러왔습니다:', tasks.length + '개');
-      } else if (data && data.length === 0 && tasks.length > 0) {
-        // DB 테이블이 비어있는 경우 초기 샘플 데이터 클라우드 동기화
-        syncAllToSupabase();
+        console.log('☁️ Supabase에서 내 할 일 목록을 불러왔습니다:', tasks.length + '개');
       }
     } catch (err) {
       console.error('Supabase fetch error:', err);
     }
   }
 
-  async function syncAllToSupabase() {
-    if (!supabase || tasks.length === 0) return;
-    try {
-      const dbRows = tasks.map(toDBTask);
-      const { error } = await supabase.from('todos').upsert(dbRows);
-      if (!error) console.log('☁️ Supabase에 초기 데이터를 성공적으로 업로드했습니다.');
-    } catch (err) {
-      console.warn('Supabase sync warning:', err);
-    }
-  }
-
   async function insertSupabaseTask(task) {
-    if (!supabase) return;
+    if (!supabase || !currentUser) return;
     try {
       const { error } = await supabase.from('todos').insert([toDBTask(task)]);
       if (error) console.warn('Supabase insert warning:', error.message);
@@ -260,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function updateSupabaseTask(task) {
-    if (!supabase) return;
+    if (!supabase || !currentUser) return;
     try {
       const { error } = await supabase.from('todos').update(toDBTask(task)).eq('id', task.id);
       if (error) console.warn('Supabase update warning:', error.message);
@@ -270,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function deleteSupabaseTask(id) {
-    if (!supabase) return;
+    if (!supabase || !currentUser) return;
     try {
       const { error } = await supabase.from('todos').delete().eq('id', id);
       if (error) console.warn('Supabase delete warning:', error.message);
@@ -565,6 +593,165 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Import Data JSON
     document.getElementById('file-import-json').addEventListener('change', importDataJSON);
+  }
+
+  /* ==========================================================================
+     Authentication Event Listeners & Handlers
+     ========================================================================== */
+  let currentAuthMode = 'login'; // 'login' or 'signup'
+
+  function attachAuthEventListeners() {
+    const tabLogin = document.getElementById('tab-login');
+    const tabSignup = document.getElementById('tab-signup');
+    const authForm = document.getElementById('auth-form');
+    const btnLogout = document.getElementById('btn-logout');
+
+    if (tabLogin && tabSignup) {
+      tabLogin.addEventListener('click', () => switchAuthTab('login'));
+      tabSignup.addEventListener('click', () => switchAuthTab('signup'));
+    }
+
+    if (authForm) {
+      authForm.addEventListener('submit', handleAuthFormSubmit);
+    }
+
+    if (btnLogout) {
+      btnLogout.addEventListener('click', handleLogout);
+    }
+  }
+
+  function switchAuthTab(mode) {
+    currentAuthMode = mode;
+    const tabLogin = document.getElementById('tab-login');
+    const tabSignup = document.getElementById('tab-signup');
+    const groupPasswordConfirm = document.getElementById('group-password-confirm');
+    const authTitle = document.getElementById('auth-title');
+    const authSubtitle = document.getElementById('auth-subtitle');
+    const authBtnText = document.getElementById('auth-btn-text');
+    const authBtnIcon = document.getElementById('auth-btn-icon');
+    const inputConfirm = document.getElementById('auth-password-confirm');
+    const alertEl = document.getElementById('auth-alert');
+
+    if (alertEl) alertEl.style.display = 'none';
+
+    if (mode === 'login') {
+      tabLogin.classList.add('active');
+      tabSignup.classList.remove('active');
+      groupPasswordConfirm.style.display = 'none';
+      if (inputConfirm) inputConfirm.removeAttribute('required');
+      authTitle.textContent = '스마트 할 일 시작하기';
+      authSubtitle.textContent = '계정에 로그인하여 나만의 일정을 안전하게 관리하세요';
+      authBtnText.textContent = '로그인';
+      authBtnIcon.className = 'fa-solid fa-arrow-right-to-bracket';
+    } else {
+      tabSignup.classList.add('active');
+      tabLogin.classList.remove('active');
+      groupPasswordConfirm.style.display = 'block';
+      if (inputConfirm) inputConfirm.setAttribute('required', 'true');
+      authTitle.textContent = '새 계정 만들기';
+      authSubtitle.textContent = '새로운 계정을 생성하고 나만의 할 일 목록을 시작하세요';
+      authBtnText.textContent = '회원가입';
+      authBtnIcon.className = 'fa-solid fa-user-plus';
+    }
+  }
+
+  function showAuthAlert(message, type = 'error') {
+    const alertEl = document.getElementById('auth-alert');
+    if (!alertEl) return;
+    const icon = type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-check';
+    alertEl.className = `auth-alert ${type}`;
+    alertEl.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${message}</span>`;
+    alertEl.style.display = 'flex';
+  }
+
+  function formatAuthErrorMessage(msg) {
+    if (!msg) return '오류가 발생했습니다.';
+    const lower = msg.toLowerCase();
+    if (lower.includes('invalid login credentials')) return '이메일 또는 비밀번호가 올바르지 않습니다.';
+    if (lower.includes('user already registered')) return '이미 가입된 이메일 주소입니다. 로그인을 시도해 보세요.';
+    if (lower.includes('password should be at least')) return '비밀번호는 최소 6자 이상이어야 합니다.';
+    if (lower.includes('email not confirmed')) return '이메일 인증이 완료되지 않았습니다. 받은 편지함을 확인해 주세요.';
+    if (lower.includes('rate limit')) return '너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해 주세요.';
+    return msg;
+  }
+
+  async function handleAuthFormSubmit(e) {
+    e.preventDefault();
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    const submitBtn = document.getElementById('btn-auth-submit');
+    const btnText = document.getElementById('auth-btn-text');
+
+    if (!supabase) {
+      showAuthAlert('Supabase 클라이언트가 초기화되지 않았습니다. 환경 변수를 확인해 주세요.', 'error');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    const origText = btnText.textContent;
+    btnText.textContent = '처리 중...';
+
+    try {
+      if (currentAuthMode === 'signup') {
+        const confirmPw = document.getElementById('auth-password-confirm').value;
+        if (password !== confirmPw) {
+          showAuthAlert('비밀번호 확인이 일치하지 않습니다.', 'error');
+          submitBtn.disabled = false;
+          btnText.textContent = origText;
+          return;
+        }
+        if (password.length < 6) {
+          showAuthAlert('비밀번호는 최소 6자 이상이어야 합니다.', 'error');
+          submitBtn.disabled = false;
+          btnText.textContent = origText;
+          return;
+        }
+
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password
+        });
+
+        if (error) {
+          showAuthAlert(formatAuthErrorMessage(error.message), 'error');
+        } else {
+          if (data.session) {
+            showAuthAlert('회원가입 완료! 접속 중...', 'success');
+          } else {
+            showAuthAlert('회원가입이 완료되었습니다! 로그인 탭에서 로그인해 주세요.', 'success');
+            setTimeout(() => switchAuthTab('login'), 1200);
+          }
+        }
+      } else {
+        // Login mode
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) {
+          showAuthAlert(formatAuthErrorMessage(error.message), 'error');
+        } else {
+          showAuthAlert('로그인 성공! 일정을 불러옵니다...', 'success');
+        }
+      }
+    } catch (err) {
+      showAuthAlert(err.message || '인증 처리 중 오류가 발생했습니다.', 'error');
+    } finally {
+      submitBtn.disabled = false;
+      btnText.textContent = origText;
+    }
+  }
+
+  async function handleLogout() {
+    if (!supabase) return;
+    if (!confirm('정말로 로그아웃하시겠습니까?')) return;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error('Sign out error:', error);
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
   }
 
   /* ==========================================================================
